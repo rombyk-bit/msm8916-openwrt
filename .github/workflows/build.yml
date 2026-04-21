@@ -1,10 +1,11 @@
+
 name: OpenWrt Builder
 
 on:
   workflow_dispatch:
     inputs:
       device:
-        description: 'Target device (all = build all devices)'
+        description: 'Target device'
         required: false
         type: choice
         default: all
@@ -12,6 +13,7 @@ on:
           - all
           - uz801
           - uf02
+          - ufi103s
 
 env:
   UPLOAD_FIRMWARE: true
@@ -26,15 +28,14 @@ jobs:
     - name: Resolve latest stable OpenWrt 25.12.x tag
       id: resolve
       run: |
-        VERSION=$(git ls-remote --tags https://git.openwrt.org/openwrt/openwrt.git 'v25.12.*' \
+        VERSION=$(git ls-remote --tags https://openwrt.org 'v25.12.*' \
+
           | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
         if [ -z "$VERSION" ]; then
           echo "ERROR: Could not resolve a stable OpenWrt 25.12.x version"
           exit 1
         fi
-        echo "Resolved OpenWrt version: $VERSION"
         echo "version=$VERSION" >> $GITHUB_OUTPUT
-
   build:
     needs: resolve-version
     runs-on: ubuntu-22.04
@@ -42,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        device: ${{ fromJSON((inputs.device == 'all' || inputs.device == '') && '["uz801","uf02"]' || format('["{0}"]', inputs.device)) }}
+        device: ${{ fromJSON((inputs.device == 'all' || inputs.device == '') && '["uz801","uf02","ufi103s"]' || format('["{0}"]', inputs.device)) }}
 
     steps:
     - name: Checkout
@@ -62,8 +63,7 @@ jobs:
 
     - name: Clone OpenWrt source code
       run: |
-        echo "Using OpenWrt ${{ needs.resolve-version.outputs.openwrt_version }}"
-        git clone https://git.openwrt.org/openwrt/openwrt.git openwrt
+        git clone https://openwrt.org openwrt
         git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
 
     - name: Load msm89xx target and packages
@@ -72,11 +72,22 @@ jobs:
         ./apply_patches.sh openwrt
         mv msm89xx openwrt/target/linux/msm89xx
         mv packages openwrt/package/msm8916
+        
+        # Инъекция вашего DTS, если выбрано устройство ufi103s
+        if [ "${{ matrix.device }}" = "ufi103s" ]; then
+          echo "Applying custom DTS for ufi103s..."
+          if [ -f "ufi103s.dts" ]; then
+            # Подменяем стандартный DTS от uz801 вашим файлом
+            cp ufi103s.dts openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/msm8916-uz801.dts
+          else
+            echo "Error: ufi103s.dts not found in repository root!"
+            exit 1
+          fi
+        fi
 
     - name: Update and install feeds
       run: |
         cd openwrt
-        rm -rf tmp
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
@@ -84,7 +95,7 @@ jobs:
       run: |
         DEVICE="${{ matrix.device }}"
         DIFFCONFIG="diffconfig_${DEVICE}"
-        [ -f "$DIFFCONFIG" ] && mv "$DIFFCONFIG" openwrt/.config
+        [ -f "$DIFFCONFIG" ] && cp "$DIFFCONFIG" openwrt/.config
 
     - name: Download package
       id: package
@@ -98,8 +109,7 @@ jobs:
       id: compile
       run: |
         cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        make -j$(nproc) || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
@@ -116,11 +126,10 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: openwrt_firmware_${{ matrix.device }}_${{needs.resolve-version.outputs.openwrt_version}}_${{ env.FILE_DATE }}
+        name: openwrt_firmware_${{ matrix.device }}_${{ env.FILE_DATE }}
         path: |
           ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-gpt_both0.bin
           ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-boot.img
           ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-system.img
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*.manifest
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-flash.sh
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-firmware.zip
+          ${{ env.FIRMWARE }}/*.manifest
+          
