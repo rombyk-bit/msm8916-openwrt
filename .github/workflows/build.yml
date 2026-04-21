@@ -1,11 +1,10 @@
-
 name: OpenWrt Builder
 
 on:
   workflow_dispatch:
     inputs:
       device:
-        description: 'Target device'
+        description: 'Target device (all = build all devices)'
         required: false
         type: choice
         default: all
@@ -13,7 +12,7 @@ on:
           - all
           - uz801
           - uf02
-          - ufi103s
+          - ufi103s # Добавлено устройство
 
 env:
   UPLOAD_FIRMWARE: true
@@ -28,11 +27,15 @@ jobs:
     - name: Resolve latest stable OpenWrt 25.12.x tag
       id: resolve
       run: |
-        VERSION=$(git ls-remote --tags https://openwrt.org 'v25.12.*' | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
-        if [ -z "$VERSION" ]; then echo "ERROR: Could not resolve version"; exit 1; fi
+        VERSION=$(git ls-remote --tags https://git.openwrt.org/openwrt/openwrt.git 'v25.12.*' \
+
+          | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
+        if [ -z "$VERSION" ]; then
+          echo "ERROR: Could not resolve a stable OpenWrt 25.12.x version"
+          exit 1
+        fi
         echo "Resolved OpenWrt version: $VERSION"
         echo "version=$VERSION" >> $GITHUB_OUTPUT
-        
   build:
     needs: resolve-version
     runs-on: ubuntu-22.04
@@ -40,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        device: ${{ fromJSON((inputs.device == 'all' || inputs.device == '') && '["uz801","uf02","ufi103s"]' || format('["{0}"]', inputs.device)) }}
+        device: ${{ fromJSON((inputs.device == 'all' || inputs.device == '') && '["uz801","uf02","ufi103s"]' || format('["{0}"]', inputs.device)) }} # Добавлено в матрицу
 
     steps:
     - name: Checkout
@@ -57,12 +60,11 @@ jobs:
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
-
     - name: Clone OpenWrt source code
       run: |
-        git clone https://openwrt.org openwrt
+        echo "Using OpenWrt ${{ needs.resolve-version.outputs.openwrt_version }}"
+        git clone https://git.openwrt.org/openwrt/openwrt.git openwrt
         git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
-
     - name: Load msm89xx target and packages
       run: |
         chmod +x apply_patches.sh
@@ -70,30 +72,29 @@ jobs:
         mv msm89xx openwrt/target/linux/msm89xx
         mv packages openwrt/package/msm8916
         
-        # Инъекция вашего DTS, если выбрано устройство ufi103s
+        # Подмена DTS для ufi103s (имитируем сборку uz801 с твоим файлом)
         if [ "${{ matrix.device }}" = "ufi103s" ]; then
-          echo "Applying custom DTS for ufi103s..."
           if [ -f "ufi103s.dts" ]; then
-            # Подменяем стандартный DTS от uz801 вашим файлом
             cp ufi103s.dts openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/msm8916-uz801.dts
+            echo "Custom DTS applied for ufi103s"
           else
-            echo "Error: ufi103s.dts not found in repository root!"
+            echo "Error: ufi103s.dts not found in root"
             exit 1
           fi
         fi
-
+        
     - name: Update and install feeds
       run: |
         cd openwrt
+        rm -rf tmp
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
     - name: Load diffconfig
       run: |
         DEVICE="${{ matrix.device }}"
+        # Если выбрано ufi103s, используем его конфиг, иначе стандартные
         DIFFCONFIG="diffconfig_${DEVICE}"
-        [ -f "$DIFFCONFIG" ] && cp "$DIFFCONFIG" openwrt/.config
-
+        [ -f "$DIFFCONFIG" ] && mv "$DIFFCONFIG" openwrt/.config
     - name: Download package
       id: package
       run: |
@@ -101,15 +102,14 @@ jobs:
         make defconfig
         make download -j8
         find dl -size -1024c -exec rm -f {} \; || true
-
     - name: Compile the firmware
       id: compile
       run: |
         cd openwrt
-        make -j$(nproc) || make -j1 V=s
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-
     - name: Organize files
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
@@ -118,15 +118,16 @@ jobs:
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
-
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: openwrt_firmware_${{ matrix.device }}_${{ env.FILE_DATE }}
+        name: openwrt_firmware_${{ matrix.device }}_${{needs.resolve-version.outputs.openwrt_version}}_${{ env.FILE_DATE }}
         path: |
           ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-gpt_both0.bin
           ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-boot.img
           ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-system.img
-          ${{ env.FIRMWARE }}/*.manifest
+          ${{ env.FIRMWARE }}/openwrt-msm89xx-*.manifest
+          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-flash.sh
+          ${{ env.FIRMWARE }}/openwrt-msm89xx
           
