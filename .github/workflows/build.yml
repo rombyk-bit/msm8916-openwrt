@@ -24,118 +24,104 @@ jobs:
     outputs:
       openwrt_version: ${{ steps.resolve.outputs.version }}
     steps:
-    - name: Resolve latest stable OpenWrt 25.12.x tag
-      id: resolve
-      run: |
-        # Команда в одну строку, чтобы избежать ошибок синтаксиса Bash
-        VERSION=$(git ls-remote --tags https://git.github.com/openwrt/openwrt.git 'v25.12.*' | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
-        if [ -z "$VERSION" ]; then
-          echo "ERROR: Could not resolve a stable OpenWrt 25.12.x version"
-          exit 1
-        fi
-        echo "Resolved OpenWrt version: $VERSION"
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        
+      - name: Resolve latest stable OpenWrt tag
+        id: resolve
+        run: |
+          # Используем GitHub зеркало и стабильную ветку v23.05
+          VERSION=$(git ls-remote --tags https://github.com 'v23.05.*' | grep -oP 'v23\.05\.\d+$' | sort -V | tail -1)
+          if [ -z "$VERSION" ]; then
+            VERSION="v23.05.3"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
   build:
     needs: resolve-version
     runs-on: ubuntu-22.04
-
     strategy:
       fail-fast: false
       matrix:
-        device: ${{ fromJSON((inputs.device == 'all' || inputs.device == '') && '["uz801","uf02","ufi103s"]' || format('["{0}"]', inputs.device)) }}
+        device: ["uz801", "uf02", "ufi103s"]
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Initialization environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
-        sudo -E apt-get -qq update
-        sudo -E ./devenv/dependencies.sh
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
+      - name: Initialization environment
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          sudo -E apt-get -qq update
+          sudo -E ./devenv/dependencies.sh
+          sudo timedatectl set-timezone "$TZ"
 
-    - name: Clone OpenWrt source code
-      run: |
-        # Вставь этот URL, он 100% рабочий:
-        git clone https://github.com openwrt
-        git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
-        
+      - name: Clone OpenWrt source code
+        run: |
+          git clone https://github.com openwrt
+          git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
 
-    - name: Load msm89xx target and packages
-      run: |
-        chmod +x apply_patches.sh
-        ./apply_patches.sh openwrt
-        mv msm89xx openwrt/target/linux/msm89xx
-        mv packages openwrt/package/msm8916
-        
-        if [ "${{ matrix.device }}" = "ufi103s" ]; then
-          echo "Preparing folders and applying custom DTS..."
-          # Создаем структуру папок, если её нет
-          mkdir -p openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/
+      - name: Load msm89xx target and packages
+        run: |
+          chmod +x apply_patches.sh
+          ./apply_patches.sh openwrt
+          mv msm89xx openwrt/target/linux/msm89xx
+          mv packages openwrt/package/msm8916
           
-          if [ -f "ufi103s.dts" ]; then
-            cp ufi103s.dts openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/msm8916-uz801.dts
-            echo "DTS successfully copied!"
-          else
-            echo "Error: ufi103s.dts not found!"
-            exit 1
+          # Меняем IP во всех конфигах по умолчанию на 15.1
+          sed -i 's/192.168.1.1/192.168.15.1/g' openwrt/package/base-files/files/bin/config_generate
+
+          if [ "${{ matrix.device }}" = "ufi103s" ]; then
+            echo "Applying custom DTS and network config for UFI103S..."
+            mkdir -p openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/
+            [ -f "ufi103s.dts" ] && cp ufi103s.dts openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/msm8916-uz801.dts
+            
+            mkdir -p openwrt/files/etc/config
+            cat <<EOF > openwrt/files/etc/config/network
+                      if [ "${{ matrix.device }}" = "ufi103s" ]; then
+            mkdir -p openwrt/files/etc/config
+            echo "config interface 'loopback'" > openwrt/files/etc/config/network
+            echo "    option device 'lo'" >> openwrt/files/etc/config/network
+            echo "    option ipaddr '127.0.0.1'" >> openwrt/files/etc/config/network
+            echo "config device" >> openwrt/files/etc/config/network
+            echo "    option name 'br-lan'" >> openwrt/files/etc/config/network
+            echo "    option type 'bridge'" >> openwrt/files/etc/config/network
+            echo "    list ports 'usb0'" >> openwrt/files/etc/config/network
+            echo "config interface 'lan'" >> openwrt/files/etc/config/network
+            echo "    option ipaddr '192.168.15.1'" >> openwrt/files/etc/config/network
+            echo "    option proto 'static'" >> openwrt/files/etc/config/network
           fi
-        fi
-        
+          
+      - name: Update and install feeds
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
-    - name: Update and install feeds
-      run: |
-        cd openwrt
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
+      - name: Load diffconfig
+        run: |
+          DEVICE="${{ matrix.device }}"
+          DIFFCONFIG="diffconfig_${DEVICE}"
+          [ -f "$DIFFCONFIG" ] && cp "$DIFFCONFIG" openwrt/.config || echo "No config found"
 
-    - name: Load diffconfig
-      run: |
-        DEVICE="${{ matrix.device }}"
-        DIFFCONFIG="diffconfig_${DEVICE}"
-        [ -f "$DIFFCONFIG" ] && cp "$DIFFCONFIG" openwrt/.config
+      - name: Compile the firmware
+        run: |
+          cd openwrt
+          make defconfig
+          make download -j8
+          make -j$(nproc) || make -j1 V=s
+          echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    - name: Download package
-      id: package
-      run: |
-        cd openwrt
-        make defconfig
-        make download -j8
-        find dl -size -1024c -exec rm -f {} \; || true
+      - name: Organize files
+        id: organize
+        run: |
+          mkdir -p firmware_bin
+          find openwrt/bin/targets/ -type f \( -name "*.bin" -o -name "*.img" -o -name "*.manifest" \) -exec cp {} firmware_bin/ \;
+          echo "FIRMWARE=$PWD/firmware_bin" >> $GITHUB_ENV
+          echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: Compile the firmware
-      id: compile
-      run: |
-        cd openwrt
-        make -j$(nproc) || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-
-    - name: Organize files
-      id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-      run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Upload firmware
-      uses: actions/upload-artifact@v4
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      with:
-        name: openwrt_firmware_${{ matrix.device }}_${{ env.FILE_DATE }}
-        path: |
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-gpt_both0.bin
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-boot.img
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-system.img
-          ${{ env.FIRMWARE }}/*.manifest
-
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        if: steps.organize.outputs.status == 'success'
+        with:
+          name: openwrt_${{ matrix.device }}_${{ env.FILE_DATE }}
+          path: ${{ env.FIRMWARE }}/*
           
