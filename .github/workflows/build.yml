@@ -19,7 +19,7 @@ env:
   TZ: Europe/Madrid
 
 jobs:
-    resolve-version:
+  resolve-version:
     runs-on: ubuntu-22.04
     outputs:
       openwrt_version: ${{ steps.resolve.outputs.version }}
@@ -27,18 +27,14 @@ jobs:
     - name: Resolve latest stable OpenWrt 25.12.x tag
       id: resolve
       run: |
-        VERSION=$(git ls-remote --tags https://git.openwrt.org/openwrt/openwrt.git 'v25.12.*' \
-          | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
+        VERSION=$(git ls-remote --tags https://openwrt.org 'v25.12.*' | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
         if [ -z "$VERSION" ]; then
           echo "ERROR: Could not resolve a stable OpenWrt 25.12.x version"
           exit 1
         fi
-        echo "Resolved OpenWrt version: $VERSION"
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-
-
- build:
+  build:
     needs: resolve-version
     runs-on: ubuntu-22.04
     strategy:
@@ -73,7 +69,7 @@ jobs:
         # Смена IP на 192.168.15.1
         sed -i 's/192.168.1.1/192.168.15.1/g' openwrt/package/base-files/files/bin/config_generate
 
-        # Настройки сети для UFI103S через echo (без EOF)
+        # Настройки сети для UFI103S через echo
         if [ "${{ matrix.device }}" = "ufi103s" ]; then
           echo "Applying custom config for UFI103S..."
           mkdir -p openwrt/files/etc/config
@@ -104,7 +100,11 @@ jobs:
       run: |
         DEVICE="${{ matrix.device }}"
         DIFFCONFIG="diffconfig_${DEVICE}"
-        [ -f "$DIFFCONFIG" ] && cp "$DIFFCONFIG" openwrt/.config || echo "No config found"
+        if [ -f "$DIFFCONFIG" ]; then
+          cp "$DIFFCONFIG" openwrt/.config
+        else
+          echo "WARNING: $DIFFCONFIG not found!"
+        fi
 
     - name: Compile the firmware
       run: |
