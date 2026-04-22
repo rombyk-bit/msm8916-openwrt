@@ -35,7 +35,8 @@ jobs:
         fi
         echo "Resolved OpenWrt version: $VERSION"
         echo "version=$VERSION" >> $GITHUB_OUTPUT
-        
+
+
 
  build:
     needs: resolve-version
