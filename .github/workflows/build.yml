@@ -24,16 +24,18 @@ jobs:
     outputs:
       openwrt_version: ${{ steps.resolve.outputs.version }}
     steps:
-      - name: Resolve latest stable OpenWrt tag
-        id: resolve
-        run: |
-          # Используем GitHub зеркало и стабильную ветку v23.05
-          VERSION=$(git ls-remote --tags https://github.com 'v23.05.*' | grep -oP 'v23\.05\.\d+$' | sort -V | tail -1)
-          if [ -z "$VERSION" ]; then
-            VERSION="v23.05.3"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
+    - name: Resolve latest stable OpenWrt 25.12.x tag
+      id: resolve
+      run: |
+        VERSION=$(git ls-remote --tags https://git.openwrt.org/openwrt/openwrt.git 'v25.12.*' \
+          | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
+        if [ -z "$VERSION" ]; then
+          echo "ERROR: Could not resolve a stable OpenWrt 25.12.x version"
+          exit 1
+        fi
+        echo "Resolved OpenWrt version: $VERSION"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
   build:
     needs: resolve-version
     runs-on: ubuntu-22.04
