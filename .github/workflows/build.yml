@@ -74,17 +74,20 @@ jobs:
         mv msm89xx openwrt/target/linux/msm89xx
         mv packages openwrt/package/msm8916
         
-        # Инъекция вашего DTS, если выбрано устройство ufi103s
         if [ "${{ matrix.device }}" = "ufi103s" ]; then
-          echo "Applying custom DTS for ufi103s..."
+          echo "Preparing folders and applying custom DTS..."
+          # Создаем структуру папок, если её нет
+          mkdir -p openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/
+          
           if [ -f "ufi103s.dts" ]; then
-            # Подменяем стандартный DTS от uz801 вашим файлом
             cp ufi103s.dts openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/msm8916-uz801.dts
+            echo "DTS successfully copied!"
           else
-            echo "Error: ufi103s.dts not found in repository root!"
+            echo "Error: ufi103s.dts not found!"
             exit 1
           fi
         fi
+        
 
     - name: Update and install feeds
       run: |
