@@ -1,4 +1,3 @@
-
 name: OpenWrt Builder
 
 on:
@@ -136,4 +135,5 @@ jobs:
           ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-boot.img
           ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-system.img
           ${{ env.FIRMWARE }}/*.manifest
+
           
