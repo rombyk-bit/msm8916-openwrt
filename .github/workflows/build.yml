@@ -63,8 +63,10 @@ jobs:
 
     - name: Clone OpenWrt source code
       run: |
-        git clone https://openwrt.org openwrt
+        # Вставь этот URL, он 100% рабочий:
+        git clone https://github.com openwrt
         git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
+        
 
     - name: Load msm89xx target and packages
       run: |
