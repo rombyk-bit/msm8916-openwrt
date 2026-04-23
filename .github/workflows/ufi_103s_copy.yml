@@ -62,87 +62,61 @@ jobs:
 
     - name: Clone OpenWrt source code
       run: |
-        # Увеличиваем буферы для стабильности при больших загрузках
-        git config --global http.postBuffer 524288000
-        git config --global http.lowSpeedLimit 0
-        git config --global http.lowSpeedTime 999999
-        
-        # Клонируем только нужную версию с минимальной историей (--depth 1)
         echo "Using OpenWrt ${{ needs.resolve-version.outputs.openwrt_version }}"
-        git clone --depth 1 --branch ${{ needs.resolve-version.outputs.openwrt_version }} https://git.openwrt.org/openwrt/openwrt.git openwrt
-        
+        git clone https://git.openwrt.org/openwrt/openwrt.git openwrt
+        git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
 
-    - name: Load msm89xx target and apply patches
+    - name: Load msm89xx target and packages
       run: |
-        # 1. Применяем патч для Wi-Fi (используем относительный путь)
+        # 1. Скрипт патчинга Wi-Fi
         chmod +x apply_patches.sh
         ./apply_patches.sh openwrt
         
-        # 2. Подготовка таргета
-        # Проверяем, где мы находимся
-        pwd
-        ls -d msm89xx packages || echo "Folders not found"
-
-        # Заменяем таргет (используем простые пути без переменных)
-        rm -rf openwrt/target/linux/msm89xx
-        cp -a msm89xx openwrt/target/linux/
-        
-        if [ -d "packages" ]; then
-          cp -a packages openwrt/package/msm8916
+        # 2. Применяем патч таргета для UFI103S (если он есть в папке msm89xx)
+        if [ -f "msm89xx/999-add-ufi103s.patch" ]; then
+          patch -p1 -d openwrt < msm89xx/999-add-ufi103s.patch
         fi
 
-        # 3. Скачиваем DTS
-        DTS_DIR="openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
-        mkdir -p "$DTS_DIR"
-        curl -sL "https://githubusercontent.com" -o "$DTS_DIR/msm8916-wingtech-ufi103s.dts"
-        curl -sL "https://githubusercontent.com" -o "$DTS_DIR/msm8916-wingtech-ufi.dtsi"
+        # 3. Перенос патчей ядра 6.12 (копируем, чтобы не удалять из корня для матрицы)
+        mkdir -p openwrt/target/linux/msm89xx/patches-6.12
+        cp msm89xx/*.patch openwrt/target/linux/msm89xx/patches-6.12/ 2>/dev/null || true
+        # Удаляем патч таргета из папки патчей ядра
+        rm -f openwrt/target/linux/msm89xx/patches-6.12/999-add-ufi103s.patch
 
-        # 4. Регистрация устройства
-        MAKEFILE_PATH="openwrt/target/linux/msm89xx/image/Makefile"
-        
-        # Создаем временный файл профиля
-        cat > device_info <<EOF
-         define Device/wingtech_ufi103s
-         DEVICE_VENDOR := Wingtech
-         DEVICE_MODEL := UFI103S
-         DEVICE_DTS := msm8916-wingtech-ufi103s
-         SUPPORTED_DEVICES := wingtech,ufi103s
-         DEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs
-         endef
-         TARGET_DEVICES += wingtech_ufi103s
-         EOF
-        # Вставляем перед BuildImage. Если BuildImage нет - просто в конец.
-        if grep -q "BuildImage" "$MAKEFILE_PATH"; then
-          sed -i '/eval.*call BuildImage/e cat device_info' "$MAKEFILE_PATH"
-        else
-          cat device_info >> "$MAKEFILE_PATH"
-        fi
+        # 4. Перенос DTSI файлов из корня репозитория
+        DTS_DEST="openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
+        mkdir -p "openwrt/$DTS_DEST"
+        cp *.dtsi "openwrt/$DTS_DEST/" 2>/dev/null || true
 
-        # 5. Исправляем конфиг
-        if [ -f "diffconfig_ufi103s" ]; then
-          sed -i 's/yiming-uz801v3/wingtech_ufi103s/g' diffconfig_ufi103s
-          echo -e "CONFIG_PACKAGE_kmod-wcn36xx=y\nCONFIG_PACKAGE_wcn36xx-firmware=y\nCONFIG_PACKAGE_kmod-qcom-rproc-wcnss=y\nCONFIG_PACKAGE_rmtfs=y" >> diffconfig_ufi103s
-        fi
+        # 5. Перенос таргета и пакетов (используем cp вместо mv для работы matrix)
+        cp -r msm89xx/* openwrt/target/linux/msm89xx/ 2>/dev/null || true
+        cp -r packages openwrt/package/msm8916
 
-        echo "Load target finished"
-        
-        
+        # 6. Добавление профиля ufi103s в Makefile
+        cat >> openwrt/target/linux/msm89xx/image/Makefile <<EOF
+
+              define Device/ufi103s
+              DEVICE_VENDOR := Wingtech
+              DEVICE_MODEL := UFI103S
+              DEVICE_DTS := msm8916-ufi103s
+              SUPPORTED_DEVICES := ufi103s
+              DEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs openstick-tweaks wpad-basic-wolfssl qcom-msm8916-modem-openstick-ufi103s-firmware qcom-msm8916-openstick-ufi103s-wcnss-firmware qcom-msm8916-wcnss-openstick-ufi103s-nv
+              endef
+              TARGET_DEVICES += ufi103s
+                 EOF
+
     - name: Update and install feeds
       run: |
         cd openwrt
+        rm -rf tmp
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     - name: Load diffconfig
       run: |
         DEVICE="${{ matrix.device }}"
-        # Если это ufi103s, а файла diffconfig_ufi103s нет, используем конфиг от uz801 как базу
-        if [ "$DEVICE" == "ufi103s" ] && [ ! -f "diffconfig_ufi103s" ]; then
-          cp diffconfig_uz801 openwrt/.config
-          echo "CONFIG_TARGET_DEVICE_msm89xx_DEVICE_wingtech_ufi103s=y" >> openwrt/.config
-        else
-          [ -f "diffconfig_${DEVICE}" ] && mv "diffconfig_${DEVICE}" openwrt/.config
-        fi
+        DIFFCONFIG="diffconfig_${DEVICE}"
+        [ -f "$DIFFCONFIG" ] && cp "$DIFFCONFIG" openwrt/.config
 
     - name: Download package
       id: package
@@ -156,7 +130,8 @@ jobs:
       id: compile
       run: |
         cd openwrt
-        make -j$(nproc) || make -j1 V=s
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
@@ -175,10 +150,5 @@ jobs:
       with:
         name: openwrt_firmware_${{ matrix.device }}_${{needs.resolve-version.outputs.openwrt_version}}_${{ env.FILE_DATE }}
         path: |
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-gpt_both0.bin
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-boot.img
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-squashfs-system.img
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*.manifest
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-flash.sh
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*-firmware.zip
-
+          ${{ env.FIRMWARE }}/openwrt-msm89xx-*
+          
