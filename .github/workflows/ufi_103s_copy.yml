@@ -74,11 +74,11 @@ jobs:
 
     - name: Load msm89xx target and apply patches
       run: |
-        # 1. Применяем патч для Wi-Fi драйверов (ath.mk)
+        # 1. Применяем патч для Wi-Fi драйверов
         chmod +x "${GITHUB_WORKSPACE}/apply_patches.sh"
         "${GITHUB_WORKSPACE}/apply_patches.sh" "${GITHUB_WORKSPACE}/openwrt"
         
-        # 2. Заменяем стандартный таргет на твой из репозитория
+        # 2. Заменяем таргет
         rm -rf "${GITHUB_WORKSPACE}/openwrt/target/linux/msm89xx"
         cp -a "${GITHUB_WORKSPACE}/msm89xx" "${GITHUB_WORKSPACE}/openwrt/target/linux/"
         
@@ -86,50 +86,45 @@ jobs:
           cp -a "${GITHUB_WORKSPACE}/packages" "${GITHUB_WORKSPACE}/openwrt/package/msm8916"
         fi
 
-        # 3. Скачиваем DTS файлы для UFI103S
+        # 3. Скачиваем DTS
         DTS_DIR="${GITHUB_WORKSPACE}/openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
         mkdir -p "$DTS_DIR"
         BASE_URL="https://githubusercontent.com"
         curl -sL "$BASE_URL/msm8916-wingtech-ufi103s.dts" -o "$DTS_DIR/msm8916-wingtech-ufi103s.dts"
         curl -sL "$BASE_URL/msm8916-wingtech-ufi.dtsi" -o "$DTS_DIR/msm8916-wingtech-ufi.dtsi"
 
-        # 4. Регистрируем устройство UFI103S в Makefile
+        # 4. Регистрируем устройство (безопасный метод через временный файл)
         MAKEFILE_PATH="${GITHUB_WORKSPACE}/openwrt/target/linux/msm89xx/image/Makefile"
-        sed -i '/eval.*call BuildImage/i \
-        \
-        define Device/wingtech_ufi103s\
-          DEVICE_VENDOR := Wingtech\
-          DEVICE_MODEL := UFI103S\
-          DEVICE_DTS := msm8916-wingtech-ufi103s\
-          SUPPORTED_DEVICES := wingtech,ufi103s\
-          DEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs\
-        endef\
-        TARGET_DEVICES += wingtech_ufi103s\
-        ' "$MAKEFILE_PATH"
+        
+        # Создаем блок текста
+        cat > device_block.txt <<EOF
+        define Device/wingtech_ufi103s
+        DEVICE_VENDOR := Wingtech
+        DEVICE_MODEL := UFI103S
+        DEVICE_DTS := msm8916-wingtech-ufi103s
+        SUPPORTED_DEVICES := wingtech,ufi103s
+        DEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs
+        endef
+        TARGET_DEVICES += wingtech_ufi103s
 
-        # 5. Исправляем diffconfig_ufi103s (меняем uz801 на ufi103s автоматически)
-        if [ -f "${GITHUB_WORKSPACE}/diffconfig_ufi103s" ]; then
-          sed -i 's/CONFIG_TARGET_msm89xx_msm8916_DEVICE_yiming-uz801v3=y/CONFIG_TARGET_msm89xx_msm8916_DEVICE_wingtech_ufi103s=y/' "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
-          # Добавляем драйверы Wi-Fi в конфиг, если их там нет
-          echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
-          echo "CONFIG_PACKAGE_wcn36xx-firmware=y" >> "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
-          echo "CONFIG_PACKAGE_kmod-qcom-rproc-wcnss=y" >> "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
-          echo "CONFIG_PACKAGE_rmtfs=y" >> "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
+         EOF
+        # Вставляем блок ПЕРЕД строкой BuildImage
+        sed -i '/eval.*call BuildImage/r device_block.txt' "$MAKEFILE_PATH"
+
+        # 5. Исправляем diffconfig_ufi103s
+        CONF_FILE="${GITHUB_WORKSPACE}/diffconfig_ufi103s"
+        if [ -f "$CONF_FILE" ]; then
+          sed -i 's/yiming-uz801v3/wingtech_ufi103s/g' "$CONF_FILE"
+          {
+            echo "CONFIG_PACKAGE_kmod-wcn36xx=y"
+            echo "CONFIG_PACKAGE_wcn36xx-firmware=y"
+            echo "CONFIG_PACKAGE_kmod-qcom-rproc-wcnss=y"
+            echo "CONFIG_PACKAGE_rmtfs=y"
+          } >> "$CONF_FILE"
         fi
 
-        echo "All patches for UFI103S applied successfully!"
+        echo "Success: All steps completed"
         
-
-           define Device/wingtech_ufi103s
-           DEVICE_VENDOR := Wingtech
-           DEVICE_MODEL := UFI103S
-           DEVICE_DTS := msm8916-wingtech-ufi103s
-           SUPPORTED_DEVICES := wingtech,ufi103s
-           DEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs
-           endef
-           TARGET_DEVICES += wingtech_ufi103s
-           EOF
-
     - name: Update and install feeds
       run: |
         cd openwrt
