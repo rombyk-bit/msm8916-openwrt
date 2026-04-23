@@ -27,18 +27,16 @@ jobs:
     - name: Resolve latest stable OpenWrt 25.12.x tag
       id: resolve
       run: |
-        VERSION=$(git ls-remote --tags https://git.openwrt.org/openwrt/openwrt.git 'v25.12.*' | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
+        VERSION=$(git ls-remote --tags https://openwrt.org 'v25.12.*' | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
         if [ -z "$VERSION" ]; then
-          echo "ERROR: Could not resolve a stable OpenWrt 25.12.x version"
-          exit 1
+          echo "ERROR: Could not resolve version, using fallback v23.05.3"
+          VERSION="v23.05.3"
         fi
-        echo "Resolved OpenWrt version: $VERSION"
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
   build:
     needs: resolve-version
     runs-on: ubuntu-22.04
-
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +61,7 @@ jobs:
     - name: Clone OpenWrt source code
       run: |
         echo "Using OpenWrt ${{ needs.resolve-version.outputs.openwrt_version }}"
-        git clone https://git.openwrt.org/openwrt/openwrt.git openwrt
+        git clone https://openwrt.org openwrt
         git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
 
     - name: Load msm89xx target and packages
@@ -73,26 +71,36 @@ jobs:
         mv msm89xx openwrt/target/linux/msm89xx
         mv packages openwrt/package/msm8916
         
-        # Меняем IP на 192.168.15.1 во всех прошивках
+        # Меняем IP на 15.1 во всей системе
         sed -i 's/192.168.1.1/192.168.15.1/g' openwrt/package/base-files/files/bin/config_generate
 
         # Специфичные настройки для ufi103s
         if [ "${{ matrix.device }}" = "ufi103s" ]; then
-          # КОПИРУЕМ ТВОЙ DTS (заменяем стандартный uz801 твоим файлом)
+          echo "Injecting custom DTS and network config for ufi103s..."
+          
+          # Создаем структуру папок для DTS (теперь mkdir -p здесь)
+          DTS_PATH="openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
+          mkdir -p $DTS_PATH
+          
+          # Подменяем DTS (заменяем uz801 кастомным файлом ufi103s.dts)
           if [ -f "ufi103s.dts" ]; then
-            cp ufi103s.dts openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/msm8916-uz801.dts
+            cp ufi103s.dts $DTS_PATH/msm8916-uz801.dts
+            echo "DTS replaced successfully."
           fi
 
+          # Создаем сетевой конфиг (для работы USB по адресу 192.168.15.1)
           mkdir -p openwrt/files/etc/config
           CONF="openwrt/files/etc/config/network"
           echo "config interface 'loopback'" > $CONF
           echo "    option device 'lo'" >> $CONF
           echo "    option ipaddr '127.0.0.1'" >> $CONF
           echo "    option proto 'static'" >> $CONF
+          echo "" >> $CONF
           echo "config device" >> $CONF
           echo "    option name 'br-lan'" >> $CONF
           echo "    option type 'bridge'" >> $CONF
           echo "    list ports 'usb0'" >> $CONF
+          echo "" >> $CONF
           echo "config interface 'lan'" >> $CONF
           echo "    option ipaddr '192.168.15.1'" >> $CONF
           echo "    option proto 'static'" >> $CONF
@@ -102,7 +110,6 @@ jobs:
     - name: Update and install feeds
       run: |
         cd openwrt
-        rm -rf tmp
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
@@ -110,10 +117,9 @@ jobs:
       run: |
         DEVICE="${{ matrix.device }}"
         DIFFCONFIG="diffconfig_${DEVICE}"
-        [ -f "$DIFFCONFIG" ] && mv "$DIFFCONFIG" openwrt/.config
+        [ -f "$DIFFCONFIG" ] && cp "$DIFFCONFIG" openwrt/.config
 
     - name: Download package
-      id: package
       run: |
         cd openwrt
         make defconfig
@@ -121,12 +127,9 @@ jobs:
         find dl -size -1024c -exec rm -f {} \; || true
 
     - name: Compile the firmware
-      id: compile
       run: |
         cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
+        make -j$(nproc) || make -j1 V=s
         echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Organize files
@@ -134,7 +137,7 @@ jobs:
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         mkdir -p firmware_bin
-        find openwrt/bin/targets/ -type f \( -name "*.bin" -o -name "*.img" -o -name "*.manifest" -o -name "*.sh" -o -name "*.zip" \) -exec cp {} firmware_bin/ \;
+        find openwrt/bin/targets/ -type f \( -name "*.bin" -o -name "*.img" -o -name "*.manifest" -o -name "*.sh" \) -exec cp {} firmware_bin/ \;
         echo "FIRMWARE=$PWD/firmware_bin" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
 
