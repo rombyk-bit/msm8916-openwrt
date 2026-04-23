@@ -27,7 +27,7 @@ jobs:
     - name: Resolve latest stable OpenWrt 25.12.x tag
       id: resolve
       run: |
-        VERSION=$(git ls-remote --tags https://git.openwrt.org/openwrt/openwrt.git 'v25.12.*' \
+        VERSION=$(git ls-remote --tags https://git.openwrt.org/openwrt/openwrt.git 'v25.12.*' 
 
           | grep -oP 'v25\.12\.\d+$' | sort -V | tail -1)
         if [ -z "$VERSION" ]; then
