@@ -74,56 +74,58 @@ jobs:
 
     - name: Load msm89xx target and apply patches
       run: |
-        # 1. Применяем патч для Wi-Fi драйверов
-        chmod +x "${GITHUB_WORKSPACE}/apply_patches.sh"
-        "${GITHUB_WORKSPACE}/apply_patches.sh" "${GITHUB_WORKSPACE}/openwrt"
+        # 1. Применяем патч для Wi-Fi (используем относительный путь)
+        chmod +x apply_patches.sh
+        ./apply_patches.sh openwrt
         
-        # 2. Заменяем таргет
-        rm -rf "${GITHUB_WORKSPACE}/openwrt/target/linux/msm89xx"
-        cp -a "${GITHUB_WORKSPACE}/msm89xx" "${GITHUB_WORKSPACE}/openwrt/target/linux/"
+        # 2. Подготовка таргета
+        # Проверяем, где мы находимся
+        pwd
+        ls -d msm89xx packages || echo "Folders not found"
+
+        # Заменяем таргет (используем простые пути без переменных)
+        rm -rf openwrt/target/linux/msm89xx
+        cp -a msm89xx openwrt/target/linux/
         
-        if [ -d "${GITHUB_WORKSPACE}/packages" ]; then
-          cp -a "${GITHUB_WORKSPACE}/packages" "${GITHUB_WORKSPACE}/openwrt/package/msm8916"
+        if [ -d "packages" ]; then
+          cp -a packages openwrt/package/msm8916
         fi
 
         # 3. Скачиваем DTS
-        DTS_DIR="${GITHUB_WORKSPACE}/openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
+        DTS_DIR="openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
         mkdir -p "$DTS_DIR"
-        BASE_URL="https://githubusercontent.com"
-        curl -sL "$BASE_URL/msm8916-wingtech-ufi103s.dts" -o "$DTS_DIR/msm8916-wingtech-ufi103s.dts"
-        curl -sL "$BASE_URL/msm8916-wingtech-ufi.dtsi" -o "$DTS_DIR/msm8916-wingtech-ufi.dtsi"
+        curl -sL "https://githubusercontent.com" -o "$DTS_DIR/msm8916-wingtech-ufi103s.dts"
+        curl -sL "https://githubusercontent.com" -o "$DTS_DIR/msm8916-wingtech-ufi.dtsi"
 
-        # 4. Регистрируем устройство (безопасный метод через временный файл)
-        MAKEFILE_PATH="${GITHUB_WORKSPACE}/openwrt/target/linux/msm89xx/image/Makefile"
+        # 4. Регистрация устройства
+        MAKEFILE_PATH="openwrt/target/linux/msm89xx/image/Makefile"
         
-        # Создаем блок текста
-        cat > device_block.txt <<EOF
-        define Device/wingtech_ufi103s
-        DEVICE_VENDOR := Wingtech
-        DEVICE_MODEL := UFI103S
-        DEVICE_DTS := msm8916-wingtech-ufi103s
-        SUPPORTED_DEVICES := wingtech,ufi103s
-        DEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs
-        endef
-        TARGET_DEVICES += wingtech_ufi103s
-
+        # Создаем временный файл профиля
+        cat > device_info <<EOF
+         define Device/wingtech_ufi103s
+         DEVICE_VENDOR := Wingtech
+         DEVICE_MODEL := UFI103S
+         DEVICE_DTS := msm8916-wingtech-ufi103s
+         SUPPORTED_DEVICES := wingtech,ufi103s
+         DEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs
+         endef
+         TARGET_DEVICES += wingtech_ufi103s
          EOF
-        # Вставляем блок ПЕРЕД строкой BuildImage
-        sed -i '/eval.*call BuildImage/r device_block.txt' "$MAKEFILE_PATH"
-
-        # 5. Исправляем diffconfig_ufi103s
-        CONF_FILE="${GITHUB_WORKSPACE}/diffconfig_ufi103s"
-        if [ -f "$CONF_FILE" ]; then
-          sed -i 's/yiming-uz801v3/wingtech_ufi103s/g' "$CONF_FILE"
-          {
-            echo "CONFIG_PACKAGE_kmod-wcn36xx=y"
-            echo "CONFIG_PACKAGE_wcn36xx-firmware=y"
-            echo "CONFIG_PACKAGE_kmod-qcom-rproc-wcnss=y"
-            echo "CONFIG_PACKAGE_rmtfs=y"
-          } >> "$CONF_FILE"
+        # Вставляем перед BuildImage. Если BuildImage нет - просто в конец.
+        if grep -q "BuildImage" "$MAKEFILE_PATH"; then
+          sed -i '/eval.*call BuildImage/e cat device_info' "$MAKEFILE_PATH"
+        else
+          cat device_info >> "$MAKEFILE_PATH"
         fi
 
-        echo "Success: All steps completed"
+        # 5. Исправляем конфиг
+        if [ -f "diffconfig_ufi103s" ]; then
+          sed -i 's/yiming-uz801v3/wingtech_ufi103s/g' diffconfig_ufi103s
+          echo -e "CONFIG_PACKAGE_kmod-wcn36xx=y\nCONFIG_PACKAGE_wcn36xx-firmware=y\nCONFIG_PACKAGE_kmod-qcom-rproc-wcnss=y\nCONFIG_PACKAGE_rmtfs=y" >> diffconfig_ufi103s
+        fi
+
+        echo "Load target finished"
+        
         
     - name: Update and install feeds
       run: |
