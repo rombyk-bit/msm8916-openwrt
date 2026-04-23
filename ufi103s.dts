@@ -1,37 +1,88 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 /dts-v1/;
 
-#include "msm8916-yiming-uz801v3.dts"
+#include "msm8916-ufi.dtsi"
 
 / {
-	model = "UFI103S (Based on UFI001C)";
-	compatible = "thwc,ufi001c", "yiming,uz801v3", "qcom,msm8916";
-
-	leds {
-		compatible = "gpio-leds";
-		pinctrl-0 = <&gpio_leds_default>;
-		pinctrl-names = "default";
-
-		led-r {
-			label = "red:power";
-			gpios = <&msmgpio 22 GPIO_ACTIVE_LOW>;
+	model = "ufi-001c 4G Modem Stick";
+	compatible = "thwc,ufi001c", "qcom,msm8916";
+	leds: leds {
+		sim_sel {
+			label = "sim:sel";
+			gpios = <&msmgpio 2 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
 		};
 
-		led-g {
-			label = "green:wlan";
-			gpios = <&msmgpio 21 GPIO_ACTIVE_LOW>;
-			linux,default-trigger = "phy0tpt";
+		sim_en {
+			label = "sim:en";
+			gpios = <&msmgpio 1 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
 		};
 
-		led-b {
-			label = "blue:wan";
-			gpios = <&msmgpio 20 GPIO_ACTIVE_LOW>;
+		sim_sel2 {
+			label = "sim:sel2";
+			gpios = <&msmgpio 0 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		sim_en2 {
+			label = "sim:en2";
+			gpios = <&msmgpio 3 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
 		};
 	};
 };
 
-&usb_id {
-	id-gpios = <&msmgpio 110 GPIO_ACTIVE_HIGH>;
-	pinctrl-0 = <&usb_id_default>;
-	pinctrl-names = "default";
+&button_restart {
+	gpios = <&msmgpio 37 GPIO_ACTIVE_HIGH>;
 };
+
+&led_r {
+	gpios = <&msmgpio 22 GPIO_ACTIVE_HIGH>;
+};
+
+&led_g {
+	gpios = <&msmgpio 21 GPIO_ACTIVE_HIGH>;
+};
+
+&led_b {
+	gpios = <&msmgpio 20 GPIO_ACTIVE_HIGH>;
+};
+
+/*&mpss {
+	pinctrl-0 = <&sim_ctrl_default>;
+	pinctrl-names = "default";
+};*/
+
+&button_default {
+	pins = "gpio37";
+	bias-pull-down;
+};
+
+&gpio_leds_default {
+	pins = "gpio0","gpio1","gpio2","gpio3","gpio20", "gpio21", "gpio22";
+};
+
+/* This selects the external SIM card slot by default */
+/*&msmgpio {
+	sim_ctrl_default: sim-ctrl-default-state {
+		esim-sel-pins {
+			pins = "gpio0", "gpio3";
+			bias-disable;
+			output-low;
+		};
+
+		sim-en-pins {
+			pins = "gpio1";
+			bias-disable;
+			output-low;
+		};
+
+		sim-sel-pins {
+			pins = "gpio2";
+			bias-disable;
+			output-high;
+		};
+	};
+};*/
