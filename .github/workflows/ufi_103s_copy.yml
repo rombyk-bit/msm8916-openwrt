@@ -67,23 +67,51 @@ jobs:
 
     - name: Load msm89xx target and apply patches
       run: |
-        # 1. Применяем ваш скрипт патчинга ath.mk
-        chmod +x apply_patches.sh
-        ./apply_patches.sh openwrt
+        # 1. Применяем патч для Wi-Fi драйверов (ath.mk)
+        chmod +x "${GITHUB_WORKSPACE}/apply_patches.sh"
+        "${GITHUB_WORKSPACE}/apply_patches.sh" "${GITHUB_WORKSPACE}/openwrt"
         
-        # 2. Переносим файлы таргета из вашего репозитория
-        mv msm89xx openwrt/target/linux/msm89xx
-        mv packages openwrt/package/msm8916
+        # 2. Заменяем стандартный таргет на твой из репозитория
+        rm -rf "${GITHUB_WORKSPACE}/openwrt/target/linux/msm89xx"
+        cp -a "${GITHUB_WORKSPACE}/msm89xx" "${GITHUB_WORKSPACE}/openwrt/target/linux/"
+        
+        if [ -d "${GITHUB_WORKSPACE}/packages" ]; then
+          cp -a "${GITHUB_WORKSPACE}/packages" "${GITHUB_WORKSPACE}/openwrt/package/msm8916"
+        fi
 
-        # 3. Добавляем поддержку UFI103S (DTS и профиль)
-        DTS_DIR="openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
-        mkdir -p $DTS_DIR
+        # 3. Скачиваем DTS файлы для UFI103S
+        DTS_DIR="${GITHUB_WORKSPACE}/openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
+        mkdir -p "$DTS_DIR"
         BASE_URL="https://githubusercontent.com"
         curl -sL "$BASE_URL/msm8916-wingtech-ufi103s.dts" -o "$DTS_DIR/msm8916-wingtech-ufi103s.dts"
         curl -sL "$BASE_URL/msm8916-wingtech-ufi.dtsi" -o "$DTS_DIR/msm8916-wingtech-ufi.dtsi"
 
-        # Дописываем профиль устройства в Makefile
-        cat >> openwrt/target/linux/msm89xx/image/Makefile <<EOF
+        # 4. Регистрируем устройство UFI103S в Makefile
+        MAKEFILE_PATH="${GITHUB_WORKSPACE}/openwrt/target/linux/msm89xx/image/Makefile"
+        sed -i '/eval.*call BuildImage/i \
+        \
+        define Device/wingtech_ufi103s\
+          DEVICE_VENDOR := Wingtech\
+          DEVICE_MODEL := UFI103S\
+          DEVICE_DTS := msm8916-wingtech-ufi103s\
+          SUPPORTED_DEVICES := wingtech,ufi103s\
+          DEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs\
+        endef\
+        TARGET_DEVICES += wingtech_ufi103s\
+        ' "$MAKEFILE_PATH"
+
+        # 5. Исправляем diffconfig_ufi103s (меняем uz801 на ufi103s автоматически)
+        if [ -f "${GITHUB_WORKSPACE}/diffconfig_ufi103s" ]; then
+          sed -i 's/CONFIG_TARGET_msm89xx_msm8916_DEVICE_yiming-uz801v3=y/CONFIG_TARGET_msm89xx_msm8916_DEVICE_wingtech_ufi103s=y/' "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
+          # Добавляем драйверы Wi-Fi в конфиг, если их там нет
+          echo "CONFIG_PACKAGE_kmod-wcn36xx=y" >> "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
+          echo "CONFIG_PACKAGE_wcn36xx-firmware=y" >> "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
+          echo "CONFIG_PACKAGE_kmod-qcom-rproc-wcnss=y" >> "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
+          echo "CONFIG_PACKAGE_rmtfs=y" >> "${GITHUB_WORKSPACE}/diffconfig_ufi103s"
+        fi
+
+        echo "All patches for UFI103S applied successfully!"
+        
 
            define Device/wingtech_ufi103s
            DEVICE_VENDOR := Wingtech
