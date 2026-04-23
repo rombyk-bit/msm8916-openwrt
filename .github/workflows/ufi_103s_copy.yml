@@ -93,7 +93,8 @@ jobs:
         cp -r packages openwrt/package/msm8916
 
         # 6. Регистрация профиля устройства (одной строкой для надежности)
-        printf "\ndefine Device/ufi103s\n\tDEVICE_VENDOR := Wingtech\n\tDEVICE_MODEL := UFI103S\n\tDEVICE_DTS := ufi103s\n\tSUPPORTED_DEVICES := ufi103s\n\tDEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs openstick-tweaks wpad-basic-wolfssl qcom-msm8916-modem-openstick-ufi103s-firmware qcom-msm8916-openstick-ufi103s-wcnss-firmware qcom-msm8916-wcnss-openstick-ufi103s-nv\nendef\nTARGET_DEVICES += ufi103s\n" >> openwrt/target/linux/msm89xx/image/Makefile
+        printf "\ndefine Device/ufi103s\n\tDEVICE_VENDOR := Wingtech\n\tDEVICE_MODEL := UFI103S\n\tDEVICE_DTS := msm8916-ufi103s\n\tSUPPORTED_DEVICES := ufi103s\n\tDEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs openstick-tweaks wpad-basic-wolfssl qcom-msm8916-modem-openstick-ufi103s-firmware qcom-msm8916-openstick-ufi103s-wcnss-firmware qcom-msm8916-wcnss-openstick-ufi103s-nv\nendef\nTARGET_DEVICES += ufi103s\n" >> openwrt/target/linux/msm89xx/image/Makefile
+        
         
     - name: Update and install feeds
       run: |
