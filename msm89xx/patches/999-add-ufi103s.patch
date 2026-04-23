@@ -1,0 +1,70 @@
+--- /dev/null
++++ b/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/msm8916-ufi103s.dts
+@@ -0,0 +1,72 @@
++// SPDX-License-Identifier: GPL-2.0-only
++
++/dts-v1/;
++
++#include "msm8916-ufi.dtsi"
++
++/ {
++	model = "UFI103S 4G Modem Stick";
++	compatible = "thwc,ufi103s", "thwc,ufi001c", "qcom,msm8916";
++
++	leds: leds {
++		sim_sel {
++			label = "sim:sel";
++			gpios = <&msmgpio 2 GPIO_ACTIVE_HIGH>;
++			default-state = "on";
++		};
++
++		sim_en {
++			label = "sim:en";
++			gpios = <&msmgpio 1 GPIO_ACTIVE_HIGH>;
++			default-state = "off";
++		};
++
++		sim_sel2 {
++			label = "sim:sel2";
++			gpios = <&msmgpio 0 GPIO_ACTIVE_HIGH>;
++			default-state = "off";
++		};
++
++		sim_en2 {
++			label = "sim:en2";
++			gpios = <&msmgpio 3 GPIO_ACTIVE_HIGH>;
++			default-state = "off";
++		};
++	};
++};
++
++&button_restart {
++	gpios = <&msmgpio 37 GPIO_ACTIVE_HIGH>;
++};
++
++&led_r {
++	gpios = <&msmgpio 22 GPIO_ACTIVE_HIGH>;
++};
++
++&led_g {
++	gpios = <&msmgpio 21 GPIO_ACTIVE_HIGH>;
++};
++
++&led_b {
++	gpios = <&msmgpio 20 GPIO_ACTIVE_HIGH>;
++};
++
++&button_default {
++	pins = "gpio37";
++	bias-pull-down;
++};
++
++&gpio_leds_default {
++	pins = "gpio0","gpio1","gpio2","gpio3","gpio20", "gpio21", "gpio22";
++};
+--- a/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/Makefile
++++ b/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom/Makefile
+@@ -1,2 +1,3 @@
+ dtb-$(CONFIG_ARCH_QCOM) += msm8916-uz801.dtb
+ dtb-$(CONFIG_ARCH_QCOM) += msm8916-uf02.dtb
++dtb-$(CONFIG_ARCH_QCOM) += msm8916-ufi103s.dtb
