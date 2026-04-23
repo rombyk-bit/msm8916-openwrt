@@ -103,8 +103,9 @@ jobs:
               DEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs openstick-tweaks wpad-basic-wolfssl qcom-msm8916-modem-openstick-ufi103s-firmware qcom-msm8916-openstick-ufi103s-wcnss-firmware qcom-msm8916-wcnss-openstick-ufi103s-nv
               endef
               TARGET_DEVICES += ufi103s
-                 EOF
-
+                 EOF 
+          sed -i '/DEVICE_/s/^  */\t/' openwrt/target/linux/msm89xx/image/Makefile
+      
     - name: Update and install feeds
       run: |
         cd openwrt
