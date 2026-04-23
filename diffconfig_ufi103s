@@ -1,6 +1,15 @@
 CONFIG_TARGET_msm89xx=y
 CONFIG_TARGET_msm89xx_msm8916=y
-CONFIG_TARGET_msm89xx_msm8916_DEVICE_yiming-uz801v3=y
+CONFIG_TARGET_msm89xx_msm8916_DEVICE_ufi103s=y
+CONFIG_PACKAGE_kmod-wcn36xx=y
+CONFIG_PACKAGE_wcn36xx-firmware=y
+CONFIG_PACKAGE_kmod-qcom-rproc-wcnss=y
+CONFIG_PACKAGE_rmtfs=y
+CONFIG_PACKAGE_openstick-tweaks=y
+CONFIG_PACKAGE_wpad-basic-wolfssl=y
+CONFIG_PACKAGE_qcom-msm8916-modem-openstick-ufi103s-firmware=y
+CONFIG_PACKAGE_qcom-msm8916-openstick-ufi103s-wcnss-firmware=y
+CONFIG_PACKAGE_qcom-msm8916-wcnss-openstick-ufi103s-nv=y
 CONFIG_LIBQMI_COLLECTION_FULL=y
 CONFIG_LIBQMI_WITH_MBIM_QMUX=y
 CONFIG_LIBQMI_WITH_QRTR_GLIB=y
