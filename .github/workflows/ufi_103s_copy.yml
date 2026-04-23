@@ -62,8 +62,15 @@ jobs:
 
     - name: Clone OpenWrt source code
       run: |
-        git clone https://git.openwrt.org/openwrt/openwrt.git openwrt
-        git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
+        # Увеличиваем буферы для стабильности при больших загрузках
+        git config --global http.postBuffer 524288000
+        git config --global http.lowSpeedLimit 0
+        git config --global http.lowSpeedTime 999999
+        
+        # Клонируем только нужную версию с минимальной историей (--depth 1)
+        echo "Using OpenWrt ${{ needs.resolve-version.outputs.openwrt_version }}"
+        git clone --depth 1 --branch ${{ needs.resolve-version.outputs.openwrt_version }} https://git.openwrt.org/openwrt/openwrt.git openwrt
+        
 
     - name: Load msm89xx target and apply patches
       run: |
