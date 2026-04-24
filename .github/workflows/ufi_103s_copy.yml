@@ -32,7 +32,6 @@ jobs:
           echo "ERROR: Could not resolve a stable OpenWrt 25.12.x version"
           exit 1
         fi
-        echo "Resolved OpenWrt version: $VERSION"
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
   build:
@@ -49,8 +48,6 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Initialization environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
         sudo docker image prune --all --force
@@ -62,9 +59,9 @@ jobs:
 
     - name: Clone OpenWrt source code
       run: |
-        echo "Using OpenWrt ${{ needs.resolve-version.outputs.openwrt_version }}"
         git clone https://git.openwrt.org/openwrt/openwrt.git openwrt
-        git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
+        cd openwrt
+        git checkout ${{ needs.resolve-version.outputs.openwrt_version }}
 
     - name: Load msm89xx target and packages
       run: |
@@ -72,45 +69,43 @@ jobs:
         chmod +x apply_patches.sh
         ./apply_patches.sh openwrt
         
-        # 2. Применяем патч таргета для UFI103S (если он есть в папке msm89xx)
+        # 2. Применяем патч таргета для UFI103S (он создаст DTS и обновит список DTB)
         if [ -f "msm89xx/999-add-ufi103s.patch" ]; then
           patch -p1 -d openwrt < msm89xx/999-add-ufi103s.patch
         fi
 
-        # 3. Перенос патчей ядра 6.12 (копируем, чтобы не удалять из корня для матрицы)
-        mkdir -p openwrt/target/linux/msm89xx/patches-6.12
-        cp msm89xx/*.patch openwrt/target/linux/msm89xx/patches-6.12/ 2>/dev/null || true
-        # Удаляем патч таргета из папки патчей ядра
-        rm -f openwrt/target/linux/msm89xx/patches-6.12/999-add-ufi103s.patch
-
-        # 4. Перенос DTSI файлов из корня репозитория
+        # 3. Перенос инклюдов DTSI (важно для компиляции DTS)
         DTS_DEST="openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
-        mkdir -p "openwrt/$DTS_DEST"
-        cp *.dtsi "openwrt/$DTS_DEST/" 2>/dev/null || true
+        mkdir -p "$DTS_DEST"
+        cp *.dtsi "$DTS_DEST/" 2>/dev/null || true
 
-        # 5. Перенос таргета и пакетов (используем cp вместо mv для работы matrix)
-        cp -r msm89xx/* openwrt/target/linux/msm89xx/ 2>/dev/null || true
-        cp -r packages openwrt/package/msm8916
+        # 4. Копируем патчи ЯДРА в папку 6.12 (не затирая саму папку таргета)
+        PATCH_DIR="openwrt/target/linux/msm89xx/patches-6.12"
+        mkdir -p "$PATCH_DIR"
+        cp msm89xx/*.patch "$PATCH_DIR/" 2>/dev/null || true
+        rm -f "$PATCH_DIR/999-add-ufi103s.patch"
 
-        # 6. Регистрация профиля устройства (одной строкой для надежности)
-        printf "\ndefine Device/ufi103s\n\tDEVICE_VENDOR := Wingtech\n\tDEVICE_MODEL := UFI103S\n\tDEVICE_DTS := msm8916-ufi103s\n\tSUPPORTED_DEVICES := ufi103s\n\tDEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs openstick-tweaks wpad-basic-wolfssl qcom-msm8916-modem-openstick-ufi103s-firmware qcom-msm8916-openstick-ufi103s-wcnss-firmware qcom-msm8916-wcnss-openstick-ufi103s-nv\nendef\nTARGET_DEVICES += ufi103s\n" >> openwrt/target/linux/msm89xx/image/Makefile
-        
-        
+        # 5. Копируем дополнительные пакеты
+        [ -d "packages" ] && cp -r packages openwrt/package/msm8916
+
+        # 6. Регистрация профиля устройства (с проверкой, чтобы не дублировать)
+        IMG_MAKEFILE="openwrt/target/linux/msm89xx/image/Makefile"
+        if ! grep -q "Device/ufi103s" "$IMG_MAKEFILE"; then
+          printf "\ndefine Device/ufi103s\n\tDEVICE_VENDOR := Wingtech\n\tDEVICE_MODEL := UFI103S\n\tDEVICE_DTS := msm8916-ufi103s\n\tSUPPORTED_DEVICES := ufi103s\n\tDEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs openstick-tweaks wpad-basic-wolfssl qcom-msm8916-modem-openstick-ufi103s-firmware qcom-msm8916-openstick-ufi103s-wcnss-firmware qcom-msm8916-wcnss-openstick-ufi103s-nv\nendef\nTARGET_DEVICES += ufi103s\n" >> "$IMG_MAKEFILE"
+        fi
+
     - name: Update and install feeds
       run: |
         cd openwrt
-        rm -rf tmp
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     - name: Load diffconfig
       run: |
-        DEVICE="${{ matrix.device }}"
-        DIFFCONFIG="diffconfig_${DEVICE}"
+        DIFFCONFIG="diffconfig_${{ matrix.device }}"
         [ -f "$DIFFCONFIG" ] && cp "$DIFFCONFIG" openwrt/.config
 
     - name: Download package
-      id: package
       run: |
         cd openwrt
         make defconfig
@@ -121,14 +116,13 @@ jobs:
       id: compile
       run: |
         cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        make -j$(nproc) || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Organize files
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
@@ -139,7 +133,6 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: openwrt_firmware_${{ matrix.device }}_${{needs.resolve-version.outputs.openwrt_version}}_${{ env.FILE_DATE }}
-        path: |
-          ${{ env.FIRMWARE }}/openwrt-msm89xx-*
-          
+        name: openwrt_firmware_${{ matrix.device }}_${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}/openwrt-msm89xx-*
+        
