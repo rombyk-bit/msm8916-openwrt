@@ -65,38 +65,28 @@ jobs:
 
     - name: Load msm89xx target and packages
       run: |
-        # 1. Скрипт патчинга Wi-Fi
         chmod +x apply_patches.sh
         ./apply_patches.sh openwrt
         
-        # 2. Создаем структуру папок таргета, если её еще нет
-        # В некоторых версиях OpenWrt папка image создается позже, создадим её сейчас
         mkdir -p openwrt/target/linux/msm89xx/image
         mkdir -p openwrt/target/linux/msm89xx/patches-6.12
         mkdir -p openwrt/package/msm8916
 
-        # 3. Применяем патч таргета для UFI103S
         if [ -f "msm89xx/999-add-ufi103s.patch" ]; then
-          echo "Applying target patch: 999-add-ufi103s.patch"
           patch -p1 -d openwrt < msm89xx/999-add-ufi103s.patch
         fi
 
-        # 4. Перенос инклюдов DTSI (важно для компиляции DTS)
+        # Важно для исправления ошибки cc1:
         DTS_DEST="openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
         mkdir -p "$DTS_DEST"
         cp *.dtsi "$DTS_DEST/" 2>/dev/null || true
 
-        # 5. Копируем только патчи ЯДРА (не затирая структуру)
         cp msm89xx/*.patch openwrt/target/linux/msm89xx/patches-6.12/ 2>/dev/null || true
         rm -f openwrt/target/linux/msm89xx/patches-6.12/999-add-ufi103s.patch
 
-        # 6. Копируем дополнительные пакеты
         [ -d "packages" ] && cp -r packages/* openwrt/package/msm8916/ 2>/dev/null || true
 
-        # 7. Регистрация профиля устройства (с созданием файла, если его нет)
         IMG_MAKEFILE="openwrt/target/linux/msm89xx/image/Makefile"
-        
-        # Если Makefile еще не существует (редкий случай), создадим пустой с заголовком
         if [ ! -f "$IMG_MAKEFILE" ]; then
           echo "include \$(TOPDIR)/rules.mk" > "$IMG_MAKEFILE"
         fi
@@ -104,9 +94,6 @@ jobs:
         if ! grep -q "Device/ufi103s" "$IMG_MAKEFILE"; then
           printf "\ndefine Device/ufi103s\n\tDEVICE_VENDOR := Wingtech\n\tDEVICE_MODEL := UFI103S\n\tDEVICE_DTS := msm8916-ufi103s\n\tSUPPORTED_DEVICES := ufi103s\n\tDEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs openstick-tweaks wpad-basic-wolfssl qcom-msm8916-modem-openstick-ufi103s-firmware qcom-msm8916-openstick-ufi103s-wcnss-firmware qcom-msm8916-wcnss-openstick-ufi103s-nv\nendef\nTARGET_DEVICES += ufi103s\n" >> "$IMG_MAKEFILE"
         fi
-        
-        echo "Configuration applied successfully."
-        
 
     - name: Update and install feeds
       run: |
@@ -130,15 +117,18 @@ jobs:
       id: compile
       run: |
         cd openwrt
-        make -j$(nproc) || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        # Исправлено: если make упадет, статус success НЕ запишется
+        (make -j$(nproc) || make -j1 V=s) && {
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        }
 
     - name: Organize files
       id: organize
       if: steps.compile.outputs.status == 'success' && !cancelled()
       run: |
-        cd openwrt/bin/targets/*/*
+        # Исправлен путь поиска артефактов (убрал mediatek)
+        cd openwrt/bin/targets/msm89xx/generic/ || cd openwrt/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
@@ -148,5 +138,5 @@ jobs:
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: openwrt_firmware_${{ matrix.device }}_${{ env.FILE_DATE }}
+        # Путь теперь ищет файлы msm89xx, а не mediatek
         path: ${{ env.FIRMWARE }}/openwrt-msm89xx-*
-        
