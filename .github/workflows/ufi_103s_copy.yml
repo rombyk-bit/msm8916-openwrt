@@ -32,6 +32,7 @@ jobs:
           echo "ERROR: Could not resolve a stable OpenWrt 25.12.x version"
           exit 1
         fi
+        echo "Resolved OpenWrt version: $VERSION"
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
   build:
@@ -59,38 +60,42 @@ jobs:
 
     - name: Clone OpenWrt source code
       run: |
+        echo "Using OpenWrt ${{ needs.resolve-version.outputs.openwrt_version }}"
         git clone https://git.openwrt.org/openwrt/openwrt.git openwrt
-        cd openwrt
-        git checkout ${{ needs.resolve-version.outputs.openwrt_version }}
+        git -C openwrt checkout ${{ needs.resolve-version.outputs.openwrt_version }}
 
     - name: Load msm89xx target and packages
       run: |
+        # 1. Скрипт патчинга Wi-Fi
         chmod +x apply_patches.sh
         ./apply_patches.sh openwrt
         
+        # 2. Создаем структуру папок
         mkdir -p openwrt/target/linux/msm89xx/image
         mkdir -p openwrt/target/linux/msm89xx/patches-6.12
         mkdir -p openwrt/package/msm8916
 
+        # 3. Применяем патч таргета для UFI103S
         if [ -f "msm89xx/999-add-ufi103s.patch" ]; then
           patch -p1 -d openwrt < msm89xx/999-add-ufi103s.patch
         fi
 
-        # Важно для исправления ошибки cc1:
+        # 4. Перенос инклюдов DTSI
         DTS_DEST="openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
         mkdir -p "$DTS_DEST"
         cp *.dtsi "$DTS_DEST/" 2>/dev/null || true
 
+        # 5. Копируем патчи ЯДРА 6.12
         cp msm89xx/*.patch openwrt/target/linux/msm89xx/patches-6.12/ 2>/dev/null || true
         rm -f openwrt/target/linux/msm89xx/patches-6.12/999-add-ufi103s.patch
 
+        # 6. Копируем дополнительные пакеты
         [ -d "packages" ] && cp -r packages/* openwrt/package/msm8916/ 2>/dev/null || true
 
+        # 7. Регистрация профиля в Makefile (с фиксом TAB)
         IMG_MAKEFILE="openwrt/target/linux/msm89xx/image/Makefile"
-        if [ ! -f "$IMG_MAKEFILE" ]; then
-          echo "include \$(TOPDIR)/rules.mk" > "$IMG_MAKEFILE"
-        fi
-
+        if [ ! -f "$IMG_MAKEFILE" ]; then echo "include \$(TOPDIR)/rules.mk" > "$IMG_MAKEFILE"; fi
+        
         if ! grep -q "Device/ufi103s" "$IMG_MAKEFILE"; then
           printf "\ndefine Device/ufi103s\n\tDEVICE_VENDOR := Wingtech\n\tDEVICE_MODEL := UFI103S\n\tDEVICE_DTS := msm8916-ufi103s\n\tSUPPORTED_DEVICES := ufi103s\n\tDEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs openstick-tweaks wpad-basic-wolfssl qcom-msm8916-modem-openstick-ufi103s-firmware qcom-msm8916-openstick-ufi103s-wcnss-firmware qcom-msm8916-wcnss-openstick-ufi103s-nv\nendef\nTARGET_DEVICES += ufi103s\n" >> "$IMG_MAKEFILE"
         fi
@@ -107,6 +112,7 @@ jobs:
         [ -f "$DIFFCONFIG" ] && cp "$DIFFCONFIG" openwrt/.config
 
     - name: Download package
+      id: package
       run: |
         cd openwrt
         make defconfig
@@ -117,18 +123,26 @@ jobs:
       id: compile
       run: |
         cd openwrt
-        # Исправлено: если make упадет, статус success НЕ запишется
-        (make -j$(nproc) || make -j1 V=s) && {
-          echo "status=success" >> $GITHUB_OUTPUT
-          echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-        }
+        make -j$(nproc) || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Organize files
       id: organize
       if: steps.compile.outputs.status == 'success' && !cancelled()
       run: |
-        # Исправлен путь поиска артефактов (убрал mediatek)
-        cd openwrt/bin/targets/msm89xx/generic/ || cd openwrt/bin/targets/*/*
+        echo "Searching for firmware files..."
+        find openwrt/bin/targets/ -type f -name "openwrt-msm89xx*"
+        
+        # Переход в папку с образами
+        if [ -d "openwrt/bin/targets/msm89xx/msm8916" ]; then
+          cd openwrt/bin/targets/msm89xx/msm8916
+        elif [ -d "openwrt/bin/targets/msm89xx/generic" ]; then
+          cd openwrt/bin/targets/msm89xx/generic
+        else
+          cd openwrt/bin/targets/*/*
+        fi
+        
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
@@ -138,5 +152,9 @@ jobs:
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: openwrt_firmware_${{ matrix.device }}_${{ env.FILE_DATE }}
-        # Путь теперь ищет файлы msm89xx, а не mediatek
-        path: ${{ env.FIRMWARE }}/openwrt-msm89xx-*
+        path: |
+          ${{ env.FIRMWARE }}/openwrt-msm89xx-*
+          ${{ env.FIRMWARE }}/*.img
+          ${{ env.FIRMWARE }}/*.bin
+          ${{ env.FIRMWARE }}/*.manifest
+          
