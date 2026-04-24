@@ -69,30 +69,44 @@ jobs:
         chmod +x apply_patches.sh
         ./apply_patches.sh openwrt
         
-        # 2. Применяем патч таргета для UFI103S (он создаст DTS и обновит список DTB)
+        # 2. Создаем структуру папок таргета, если её еще нет
+        # В некоторых версиях OpenWrt папка image создается позже, создадим её сейчас
+        mkdir -p openwrt/target/linux/msm89xx/image
+        mkdir -p openwrt/target/linux/msm89xx/patches-6.12
+        mkdir -p openwrt/package/msm8916
+
+        # 3. Применяем патч таргета для UFI103S
         if [ -f "msm89xx/999-add-ufi103s.patch" ]; then
+          echo "Applying target patch: 999-add-ufi103s.patch"
           patch -p1 -d openwrt < msm89xx/999-add-ufi103s.patch
         fi
 
-        # 3. Перенос инклюдов DTSI (важно для компиляции DTS)
+        # 4. Перенос инклюдов DTSI (важно для компиляции DTS)
         DTS_DEST="openwrt/target/linux/msm89xx/files/arch/arm64/boot/dts/qcom"
         mkdir -p "$DTS_DEST"
         cp *.dtsi "$DTS_DEST/" 2>/dev/null || true
 
-        # 4. Копируем патчи ЯДРА в папку 6.12 (не затирая саму папку таргета)
-        PATCH_DIR="openwrt/target/linux/msm89xx/patches-6.12"
-        mkdir -p "$PATCH_DIR"
-        cp msm89xx/*.patch "$PATCH_DIR/" 2>/dev/null || true
-        rm -f "$PATCH_DIR/999-add-ufi103s.patch"
+        # 5. Копируем только патчи ЯДРА (не затирая структуру)
+        cp msm89xx/*.patch openwrt/target/linux/msm89xx/patches-6.12/ 2>/dev/null || true
+        rm -f openwrt/target/linux/msm89xx/patches-6.12/999-add-ufi103s.patch
 
-        # 5. Копируем дополнительные пакеты
-        [ -d "packages" ] && cp -r packages openwrt/package/msm8916
+        # 6. Копируем дополнительные пакеты
+        [ -d "packages" ] && cp -r packages/* openwrt/package/msm8916/ 2>/dev/null || true
 
-        # 6. Регистрация профиля устройства (с проверкой, чтобы не дублировать)
+        # 7. Регистрация профиля устройства (с созданием файла, если его нет)
         IMG_MAKEFILE="openwrt/target/linux/msm89xx/image/Makefile"
+        
+        # Если Makefile еще не существует (редкий случай), создадим пустой с заголовком
+        if [ ! -f "$IMG_MAKEFILE" ]; then
+          echo "include \$(TOPDIR)/rules.mk" > "$IMG_MAKEFILE"
+        fi
+
         if ! grep -q "Device/ufi103s" "$IMG_MAKEFILE"; then
           printf "\ndefine Device/ufi103s\n\tDEVICE_VENDOR := Wingtech\n\tDEVICE_MODEL := UFI103S\n\tDEVICE_DTS := msm8916-ufi103s\n\tSUPPORTED_DEVICES := ufi103s\n\tDEVICE_PACKAGES := kmod-wcn36xx wcn36xx-firmware kmod-qcom-rproc-wcnss rmtfs openstick-tweaks wpad-basic-wolfssl qcom-msm8916-modem-openstick-ufi103s-firmware qcom-msm8916-openstick-ufi103s-wcnss-firmware qcom-msm8916-wcnss-openstick-ufi103s-nv\nendef\nTARGET_DEVICES += ufi103s\n" >> "$IMG_MAKEFILE"
         fi
+        
+        echo "Configuration applied successfully."
+        
 
     - name: Update and install feeds
       run: |
